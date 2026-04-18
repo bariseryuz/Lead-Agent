@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+google-generativeai
+langgraph
+pydantic
+playwright
+httpx
+beautifulsoup4
+python-dotenv
