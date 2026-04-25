@@ -1,0 +1,7 @@
+[phases.setup]
+# Ensure Railway has both runtimes available (repo has Python backend + Vite frontend).
+nixPkgs = ["nodejs_20", "python311"]
+
+[start]
+cmd = "./start.sh"
+
