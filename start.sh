@@ -11,6 +11,10 @@ fi
 
 cd "$FRONTEND_DIR"
 
+# Railway (and some builders) set npm "production" config globally, which makes npm warn.
+# We need devDependencies for the Vite/TS build, so force production=false for this install.
+export NPM_CONFIG_PRODUCTION=false
+
 if [[ -f package-lock.json ]]; then
   npm ci --include=dev
 else
