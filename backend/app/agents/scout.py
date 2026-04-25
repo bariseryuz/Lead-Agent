@@ -5,6 +5,7 @@ import asyncio
 from typing import Dict, List
 from app.models.state import AgentState
 import google.generativeai as genai
+from app.tools.search import tavily_search_urls
 
 # Setup Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
@@ -43,6 +44,14 @@ async def call_serper(queries: List[str]) -> List[str]:
                         urls.append(link)
         return list(set(urls)) # Deduplicate
 
+async def call_web_search(queries: List[str]) -> List[str]:
+    """
+    Prefer Tavily (built for AI search). Fall back to Serper if Tavily isn't configured.
+    """
+    if os.getenv("TAVILY_API_KEY"):
+        return await tavily_search_urls(queries, max_results_per_query=10, search_depth="basic")
+    return await call_serper(queries)
+
 async def scout_node(state: AgentState) -> Dict:
     """The Scout: Strategic Intent Router and URL Discovery."""
     user_query = state.get("user_query", "")
@@ -59,7 +68,7 @@ async def scout_node(state: AgentState) -> Dict:
 
     if enrichment_query:
         print(f"🔍 Scout performing Targeted Enrichment: {enrichment_query}")
-        target_urls = await call_serper([enrichment_query])
+        target_urls = await call_web_search([enrichment_query])
         return {"candidate_urls": target_urls}
 
     # STANDARD MODE: Industry Classification + Technical Query Expansion
@@ -93,7 +102,7 @@ async def scout_node(state: AgentState) -> Dict:
     print(f"🎯 Scout: Archetype [{scout_data['industry']}] | Strategy [{strategy_prompt}]")
 
     # Execute Parallel Search
-    found_urls = await call_serper(scout_data["search_queries"])
+    found_urls = await call_web_search(scout_data["search_queries"])
     
     print(f"📡 Scout found {len(found_urls)} potential sources.")
 
