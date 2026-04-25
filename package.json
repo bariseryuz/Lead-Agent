@@ -1,0 +1,12 @@
+{
+  "name": "lead-agent",
+  "private": true,
+  "scripts": {
+    "start": "bash ./start.sh",
+    "build": "npm --prefix frontend ci && npm --prefix frontend run build"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+
