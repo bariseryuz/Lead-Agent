@@ -9,8 +9,9 @@ WORKDIR /app
 
 # Backend deps
 COPY backend/requirements.txt ./backend/requirements.txt
-RUN python3 -m pip install --upgrade pip \
-  && python3 -m pip install -r ./backend/requirements.txt
+RUN python3 -m venv /app/venv \
+  && /app/venv/bin/pip install --upgrade pip \
+  && /app/venv/bin/pip install -r ./backend/requirements.txt
 
 # Frontend deps (use lockfile if present)
 COPY frontend/package.json frontend/package-lock.json ./frontend/
@@ -23,5 +24,5 @@ RUN cd frontend && npm run build
 ENV PYTHONPATH=/app/backend
 
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "/app/venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
 
