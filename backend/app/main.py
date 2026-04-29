@@ -27,13 +27,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve built frontend (single Railway service / single PORT)
-_repo_root = Path(__file__).resolve().parents[2]
-_frontend_dist = _repo_root / "frontend" / "dist"
-if _frontend_dist.is_dir():
-    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
-
-
 class HealthResponse(BaseModel):
     status: str = "ok"
 
@@ -206,3 +199,12 @@ async def pipeline_run(req: PipelineRunRequest) -> PipelineRunResponse:
         return PipelineRunResponse(plan=plan, events=events, inferences=inferences, extracted=extracted)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Serve built frontend (single Railway service / single PORT).
+# Mounted LAST so API routes above are matched first and the static
+# mount only acts as a fallback for everything else (SPA catch-all).
+_repo_root = Path(__file__).resolve().parents[2]
+_frontend_dist = _repo_root / "frontend" / "dist"
+if _frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
