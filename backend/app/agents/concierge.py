@@ -3,7 +3,7 @@ import json
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from langchain_anthropic import ChatAnthropic
-import google.generativeai as genai
+from google import genai
 
 # 1. FIXED SCHEMA: Added the missing fields so the code doesn't crash
 class SearchSchema(BaseModel):
@@ -41,12 +41,12 @@ def generate_search_schema(user_input: str):
 
 
     """
-    # Prefer Gemini for Concierge if configured (user requested).
+    # Prefer Gemini for Concierge if configured.
+    # Uses the new Google GenAI SDK (pip install google-genai).
     gemini_key = os.getenv("gemini") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if gemini_key:
-        genai.configure(api_key=gemini_key)
+        client = genai.Client(api_key=gemini_key)
         gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        model = genai.GenerativeModel(gemini_model)
 
         prompt = (
             f"{system_prompt}\n\n"
@@ -55,9 +55,10 @@ def generate_search_schema(user_input: str):
             f"User Request: {user_input}\n"
         )
 
-        resp = model.generate_content(
-            prompt,
-            generation_config={
+        resp = client.models.generate_content(
+            model=gemini_model,
+            contents=prompt,
+            config={
                 "temperature": 0,
                 "max_output_tokens": max_tokens,
                 "response_mime_type": "application/json",
@@ -66,12 +67,7 @@ def generate_search_schema(user_input: str):
         text = (getattr(resp, "text", None) or "").strip()
         if not text:
             raise RuntimeError("Gemini returned empty response")
-        try:
-            payload = json.loads(text)
-        except Exception:
-            # Some SDK versions wrap JSON in markdown fences; try to strip.
-            cleaned = text.strip().removeprefix("```json").removesuffix("```").strip()
-            payload = json.loads(cleaned)
+        payload = json.loads(text)
         return SearchSchema.model_validate(payload)
 
     # Fallback: Claude (Anthropic)

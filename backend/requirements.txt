@@ -11,3 +11,4 @@ langchain-anthropic
 langchain-core
 tavily-python
 firecrawl-py
+google-genai
