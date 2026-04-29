@@ -1,114 +1,82 @@
-import os
-import json
-import httpx
 import asyncio
-from typing import Dict, List
-from app.models.state import AgentState
-import google.generativeai as genai
-from app.tools.search import tavily_search_urls
+import os
+from typing import List, Dict
+from tavily import AsyncTavilyClient
+from pydantic import BaseModel, Field
 
-# Setup Gemini
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-2.0-flash-lite")
+# 1. Structure the Signal A output for the Hunter
+class RawEvent(BaseModel):
+    company_name: str = Field(description="Extracted company name or 'TBD'")
+    event_url: str = Field(description="Source URL of the signal")
+    event_date: str = Field(description="When the event happened or was recorded")
+    snippet: str = Field(description="Summary text of the event")
+    source_type: str = Field(description="'Technical' (ArcGIS/Socrata) or 'General' (News/Web)")
 
-# World Standard RAG Rules for Technical Discovery
-RAG_RULES = """
-- Socrata: Use 'site:gov', 'resource', '.json', 'API'. Avoid 'dev.socrata.com/foundry'.
-- ArcGIS: Use 'FeatureServer/0', 'MapServer/0', 'query?f=json'.
-- Signal Hunting: Use 'topping out', 'groundbreaking', 'crane watch', 'issued permit'.
-"""
+class SignalScout:
+    def __init__(self, tavily_key: str | None = None):
+        resolved_key = tavily_key or os.getenv("tavily_search") or os.getenv("TAVILY_API_KEY")
+        if not resolved_key:
+            raise RuntimeError("Missing Tavily API key (set `tavily_search` in env).")
+        self.client = AsyncTavilyClient(api_key=resolved_key)
 
-async def call_serper(queries: List[str]) -> List[str]:
-    """Execute multiple Serper searches in parallel to stay fast."""
-    url = "https://google.serper.dev/search"
-    headers = {
-        'X-API-KEY': os.getenv("SERPER_API_KEY"),
-        'Content-Type': 'application/json'
-    }
-    
-    async with httpx.AsyncClient() as client:
-        tasks = []
-        for q in queries:
-            tasks.append(client.post(url, headers=headers, json={"q": q, "num": 10}))
+    async def fetch_query(self, query: str) -> List[RawEvent]:
+        """
+        Executes a single search query with 'Advanced Depth' to find Signal A.
+        """
+        print(f"DEBUG: Scout searching: {query}")
         
-        responses = await asyncio.gather(*tasks)
+        # search_depth="advanced" visits the page to ensure accuracy
+        response = await self.client.search(
+            query=query, 
+            search_depth="advanced", 
+            max_results=5
+        )
         
-        urls = []
-        for resp in responses:
-            if resp.status_code == 200:
-                results = resp.json().get('organic', [])
-                for r in results:
-                    # Filter out low-signal documentation sites immediately
-                    link = r.get('link', '')
-                    if "dev.socrata.com" not in link and "documentation" not in link.lower():
-                        urls.append(link)
-        return list(set(urls)) # Deduplicate
+        results = []
+        for res in response['results']:
+            # Auto-detect Technical vs General based on URL
+            url = res['url'].lower()
+            is_technical = any(x in url for x in ['.gov', 'arcgis', 'socrata', 'data.'])
+            
+            results.append(RawEvent(
+                company_name="TBD", # Agent 3 (Hunter) will refine the official name
+                event_url=res['url'],
+                event_date=res.get('published_date', "Recent"),
+                snippet=res['content'],
+                source_type="Technical" if is_technical else "General"
+            ))
+        return results
 
-async def call_web_search(queries: List[str]) -> List[str]:
-    """
-    Prefer Tavily (built for AI search). Fall back to Serper if Tavily isn't configured.
-    """
-    if os.getenv("TAVILY_API_KEY"):
-        return await tavily_search_urls(queries, max_results_per_query=10, search_depth="basic")
-    return await call_serper(queries)
+    async def run(self, queries: List[str]) -> List[RawEvent]:
+        """
+        Runs all 3-5 queries IN PARALLEL for extreme speed.
+        """
+        # Start all searches at once
+        tasks = [self.fetch_query(q) for q in queries]
+        
+        # Wait for all to finish simultaneously
+        all_results = await asyncio.gather(*tasks)
+        
+        # Flatten the list of lists
+        flattened = [event for sublist in all_results for event in sublist]
+        
+        print(f"DEBUG: Scout finished. Found {len(flattened)} potential Signal A events.")
+        return flattened
 
-async def scout_node(state: AgentState) -> Dict:
-    """The Scout: Strategic Intent Router and URL Discovery."""
-    user_query = state.get("user_query", "")
-    retry_count = state.get("retry_count", 0)
+# --- TEST EXECUTION ---
+if __name__ == "__main__":
+    # Example queries from the Concierge
+    test_queries = [
+        "New commercial building permits Austin 2024",
+        "Recent office space lease signings Austin TX",
+        "Austin new business grand openings October 2024"
+    ]
     
-    # CHECK: Is this an enrichment request from the Architect?
-    # (If the Architect found a project but no address, we search for that specifically)
-    enrichment_query = None
-    if state.get("final_leads"):
-        for lead in state["final_leads"]:
-            if lead.status == "requires_enrichment":
-                enrichment_query = lead.enrichment_query
-                break
-
-    if enrichment_query:
-        print(f"🔍 Scout performing Targeted Enrichment: {enrichment_query}")
-        target_urls = await call_web_search([enrichment_query])
-        return {"candidate_urls": target_urls}
-
-    # STANDARD MODE: Industry Classification + Technical Query Expansion
-    strategy_prompt = "BROAD SEARCH" if retry_count > 0 else "TECHNICAL API SEARCH"
+    scout = SignalScout(tavily_key="your_tavily_api_key")
     
-    prompt = f"""
-    You are a Strategic Lead Generation Scout.
-    Strategy: {strategy_prompt}
-    RAG Rules: {RAG_RULES}
-    User Query: "{user_query}"
+    # Run the async loop
+    raw_events = asyncio.run(scout.run(test_queries))
     
-    1. CLASSIFY industry: 'construction_gov', 'retail_food', 'b2b_saas', or 'general'.
-    2. GENERATE 5 high-signal queries.
-       - If 'construction_gov': prioritize ArcGIS FeatureServers and SODA APIs.
-       - If 'retail_food': prioritize Yelp, directories, and specialty roaster lists.
-       - If 'b2b_saas': prioritize hiring boards and LinkedIn company pages.
-    
-    Return JSON: 
-    {{
-      "industry": "archetype",
-      "search_queries": ["q1", "q2", "q3", "q4", "q5"]
-    }}
-    """
-
-    response = model.generate_content(
-        prompt, 
-        generation_config={"response_mime_type": "application/json"}
-    )
-    
-    scout_data = json.loads(response.text)
-    print(f"🎯 Scout: Archetype [{scout_data['industry']}] | Strategy [{strategy_prompt}]")
-
-    # Execute Parallel Search
-    found_urls = await call_web_search(scout_data["search_queries"])
-    
-    print(f"📡 Scout found {len(found_urls)} potential sources.")
-
-    return {
-        "industry": scout_data["industry"],
-        "search_queries": scout_data["search_queries"],
-        "candidate_urls": found_urls,
-        "retry_count": retry_count
-    }
+    # This list now goes to Agent 3: The Technical Hunter
+    for e in raw_events:
+        print(f"[{e.source_type}] {e.event_url}")

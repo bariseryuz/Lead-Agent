@@ -1,39 +1,61 @@
-# backend/app/agents/hunter.py
-import httpx
-from app.models.state import AgentState
+import asyncio
+import os
+from typing import Dict, Optional, Type
+from pydantic import BaseModel, Field
+from firecrawl import FirecrawlApp
 
-async def hunter_node(state: AgentState):
-    """Universal Hunter: Dispatches the correct tool based on Industry."""
-    industry = state.get("industry", "general")
-    urls = state["candidate_urls"]
-    raw_data = []
+# 1. Define WHAT we want to find on EVERY site (The Universal Schema)
+class ExtractedLeadInfo(BaseModel):
+    company_name: str = Field(description="Official name of the business")
+    owner_name: Optional[str] = Field(description="Name of the person in charge or point of contact")
+    physical_address: str = Field(description="The address mentioned in the permit or news")
+    event_details: str = Field(description="Briefly, what is happening? (e.g. New HVAC install)")
+    website_url: Optional[str] = Field(description="The business website if found")
+    phone_number: Optional[str] = Field(description="Contact number if listed")
 
-    print(f"🕵️ Hunter Agent engaged for archetype: {industry}")
+class UniversalHunter:
+    def __init__(self, api_key: Optional[str] = None):
+        resolved_key = api_key or os.getenv("FIRECRAWL_API_KEY")
+        if not resolved_key:
+            raise RuntimeError("Missing FIRECRAWL_API_KEY")
+        self.app = FirecrawlApp(api_key=resolved_key)
 
-    for url in urls:
-        # PATH A: The Infrastructure Specialist
-        if industry == "construction":
-            data = await try_api_pivot(url) # Socrata/ArcGIS logic
-            if data: 
-                raw_data.append(data)
-                continue
+    async def run(self, url: str) -> Dict:
+        """
+        UNIVERSAL EXTRACTOR: Works for ArcGIS, Socrata, and Standard Web.
+        """
+        print(f"DEBUG: Universal Hunter visiting -> {url}")
+        
+        # Firecrawl 'Extract' handles the JS, Proxies, and AI Parsing in one call.
+        # This is 10x more universal than manual scraping.
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(
+                None, 
+                lambda: self.app.scrape_url(
+                    url, 
+                    params={
+                        'formats': ['extract'], 
+                        'extract': {'schema': ExtractedLeadInfo.model_json_schema()}
+                    }
+                )
+            )
+            
+            # If Firecrawl finds the JSON, it returns it perfectly mapped to our Schema
+            return {
+                "status": "success",
+                "data": result.get('extract', {}),
+                "metadata": result.get('metadata', {})
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
-        # PATH B: The Retail/F&B Specialist
-        if industry == "retail_food_beverage":
-            # If it's a Yelp/Maps/Menu site, we use a specialized scraper
-            data = await scrape_directory_data(url)
-            raw_data.append(data)
-            continue
-
-        # PATH C: The General Specialist (Fallback)
-        # Use Firecrawl to get clean Markdown for any business site
-        data = await firecrawl_scrape(url)
-        raw_data.append(data)
-
-    return {"raw_data": raw_data}
-
-async def firecrawl_scrape(url: str):
-    """Uses Firecrawl (or similar) to get Markdown for Gemini to read."""
-    # This works for a coffee shop's 'About Us' or a Lawyer's 'Services' page.
-    # It converts the whole site to clean text that Gemini handles easily.
-    pass
+# --- COMPACT EXECUTION ---
+if __name__ == "__main__":
+    hunter = UniversalHunter(api_key="fc-your-key")
+    
+    # This works for a Government Portal OR a regular news site
+    test_url = "https://data.austintexas.gov/resource/8p39-m8p5"
+    
+    lead_data = asyncio.run(hunter.run(test_url))
+    print(lead_data)

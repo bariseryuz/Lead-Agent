@@ -45,11 +45,11 @@ async def tavily_search_urls(
 ) -> List[str]:
     """
     Tavily search for multiple queries and return unique URLs.
-    Requires `TAVILY_API_KEY` (or pass api_key=...).
+    Requires `tavily_search` (or pass api_key=...).
     """
-    key = api_key or os.getenv("TAVILY_API_KEY")
+    key = api_key or os.getenv("tavily_search") or os.getenv("TAVILY_API_KEY")
     if not key:
-        raise RuntimeError("Missing TAVILY_API_KEY")
+        raise RuntimeError("Missing tavily_search")
 
     q_list = [q.strip() for q in queries if q and q.strip()]
     if not q_list:
