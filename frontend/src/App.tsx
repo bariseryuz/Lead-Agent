@@ -30,14 +30,58 @@ export default function App() {
     }
     appendMessage(chatId, { role: "user", content: text });
 
-    // Placeholder assistant reply until the backend is wired up.
-    setTimeout(() => {
-      appendMessage(chatId!, {
-        role: "assistant",
-        content:
-          "(The agent isn't connected yet — this is a placeholder reply. Next step: wire this to FastAPI + LangGraph.)",
-      });
-    }, 400);
+    // Call backend pipeline (served from same origin on Railway).
+    (async () => {
+      try {
+        appendMessage(chatId!, {
+          role: "assistant",
+          content: "Searching…",
+        });
+
+        const resp = await fetch("/api/pipeline/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_query: text,
+            max_events: 8,
+            max_hunter: 3,
+          }),
+        });
+
+        if (!resp.ok) {
+          const errText = await resp.text();
+          throw new Error(`${resp.status} ${resp.statusText}: ${errText}`);
+        }
+
+        const data = await resp.json();
+
+        const extracted = Array.isArray(data?.extracted) ? data.extracted : [];
+        const lines: string[] = [];
+        lines.push(`Plan: ${data?.plan?.industry ?? "Unknown"} — ${data?.plan?.location ?? "Unknown"}`);
+        lines.push("");
+
+        if (extracted.length === 0) {
+          lines.push("No pages extracted yet. Try increasing max_hunter or refining your query.");
+        } else {
+          lines.push("Top results:");
+          for (const item of extracted.slice(0, 5)) {
+            const company = item?.data?.company_name ?? "Unknown company";
+            const addr = item?.data?.physical_address ?? "";
+            lines.push(`- ${company}${addr ? ` — ${addr}` : ""}`);
+          }
+        }
+
+        appendMessage(chatId!, {
+          role: "assistant",
+          content: lines.join("\n"),
+        });
+      } catch (e) {
+        appendMessage(chatId!, {
+          role: "assistant",
+          content: `Request failed: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+    })();
   };
 
   return (
