@@ -179,11 +179,15 @@ async def pipeline_run(req: PipelineRunRequest) -> PipelineRunResponse:
     Concierge -> Scout -> (Signal + Hunter) for top N events.
     """
     try:
+        # Hard safety clamps to prevent accidental runaway spend.
+        max_events = min(max(req.max_events, 0), 20)   # Tavily calls can be expensive too
+        max_hunter = min(max(req.max_hunter, 0), 10)  # each triggers 1 Claude + 1 Firecrawl
+
         plan = generate_search_schema(req.user_query)
 
         scout = SignalScout()
         events = await scout.run(plan.search_queries)
-        events = events[: max(req.max_events, 0)]
+        events = events[:max_events]
 
         engine = SignalEngine()
         hunter = UniversalHunter()
@@ -191,7 +195,7 @@ async def pipeline_run(req: PipelineRunRequest) -> PipelineRunResponse:
         inferences: List[SignalInference] = []
         extracted: List[HunterExtractResponse] = []
 
-        for ev in events[: max(req.max_hunter, 0)]:
+        for ev in events[:max_hunter]:
             # Signal uses the raw event snippet as text input
             inf = await engine.process_raw_data(plan.industry, ev.snippet, ev.event_date)
             inferences.append(inf)

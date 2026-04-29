@@ -22,10 +22,15 @@ def generate_search_schema(user_input: str):
     key = os.getenv("concierge_agent") or os.getenv("signal_agent") or os.getenv("ANTHROPIC_API_KEY")
     if not key:
         raise RuntimeError("Missing Anthropic API key (set `concierge_agent` in env).")
+
+    # Spend guard: cap output tokens per call (defaults conservative).
+    # You can override via Railway env var `CONCIERGE_MAX_TOKENS`.
+    max_tokens = int(os.getenv("CONCIERGE_MAX_TOKENS", "500"))
     llm = ChatAnthropic(
         model="claude-3-5-sonnet-20240620",
         temperature=0,
         anthropic_api_key=key,
+        max_tokens=max_tokens,
     )
     
     # Bind the schema to the LLM
