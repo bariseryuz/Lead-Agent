@@ -1,0 +1,12 @@
+[build]
+builder = "nixpacks"
+# This is the default, but keeping it explicit avoids Railpack guessing wrong.
+nixpacksConfigPath = "nixpacks.toml"
+
+[deploy]
+startCommand = "./start.sh"
+healthcheckPath = "/health"
+healthcheckTimeout = 180
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5
+
