@@ -19,9 +19,9 @@ class SearchSchema(BaseModel):
 
 def generate_search_schema(user_input: str):
     # Initialize the "Brain"
-    key = os.getenv("concierge_agent") or os.getenv("signal_agent") or os.getenv("ANTHROPIC_API_KEY")
+    key = os.getenv("signal_agent") or os.getenv("ANTHROPIC_API_KEY")
     if not key:
-        raise RuntimeError("Missing Anthropic API key (set `concierge_agent` in env).")
+        raise RuntimeError("Missing Anthropic API key (set `signal_agent` in env).")
 
     # Spend guard: cap output tokens per call (defaults conservative).
     # You can override via Railway env var `CONCIERGE_MAX_TOKENS`.

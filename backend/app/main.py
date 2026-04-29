@@ -175,25 +175,42 @@ async def pipeline_run(req: PipelineRunRequest) -> PipelineRunResponse:
         # Hard safety clamps to prevent accidental runaway spend.
         max_events = min(max(req.max_events, 0), 20)   # Tavily calls can be expensive too
         max_hunter = min(max(req.max_hunter, 0), 10)  # each triggers 1 Claude + 1 Firecrawl
-
-        plan = generate_search_schema(req.user_query)
+        try:
+            plan = generate_search_schema(req.user_query)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"concierge_failed: {e}")
 
         scout = SignalScout()
-        events = await scout.run(plan.search_queries)
+        try:
+            events = await scout.run(plan.search_queries)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"scout_failed: {e}")
         events = events[:max_events]
 
-        engine = SignalEngine()
-        hunter = UniversalHunter()
+        try:
+            engine = SignalEngine()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"signal_init_failed: {e}")
+        try:
+            hunter = UniversalHunter()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"hunter_init_failed: {e}")
 
         inferences: List[SignalInference] = []
         extracted: List[HunterExtractResponse] = []
 
         for ev in events[:max_hunter]:
             # Signal uses the raw event snippet as text input
-            inf = await engine.process_raw_data(plan.industry, ev.snippet, ev.event_date)
+            try:
+                inf = await engine.process_raw_data(plan.industry, ev.snippet, ev.event_date)
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"signal_failed: {e}")
             inferences.append(inf)
 
-            ext = await hunter.run(ev.event_url)
+            try:
+                ext = await hunter.run(ev.event_url)
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"hunter_failed: {e}")
             extracted.append(HunterExtractResponse(**ext))
 
         return PipelineRunResponse(plan=plan, events=events, inferences=inferences, extracted=extracted)
