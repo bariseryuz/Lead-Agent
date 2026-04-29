@@ -45,7 +45,8 @@ def generate_search_schema(user_input: str):
     gemini_key = os.getenv("gemini") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if gemini_key:
         genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        model = genai.GenerativeModel(gemini_model)
 
         prompt = (
             f"{system_prompt}\n\n"
@@ -78,8 +79,9 @@ def generate_search_schema(user_input: str):
     if not key:
         raise RuntimeError("Missing LLM key (set `gemini` or `claude` in env).")
 
+    model_name = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-latest")
     llm = ChatAnthropic(
-        model="claude-3-5-sonnet-20240620",
+        model=model_name,
         temperature=0,
         anthropic_api_key=key,
         max_tokens=max_tokens,

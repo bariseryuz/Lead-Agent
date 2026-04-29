@@ -28,8 +28,9 @@ class SignalEngine:
         # Spend guard: cap output tokens per call (defaults conservative).
         # You can override via Railway env var `SIGNAL_MAX_TOKENS`.
         max_tokens = int(os.getenv("SIGNAL_MAX_TOKENS", "600"))
+        model_name = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-latest")
         self.llm = ChatAnthropic(
-            model="claude-3-5-sonnet-20240620", 
+            model=model_name,
             anthropic_api_key=resolved_key,
             temperature=0,
             max_tokens=max_tokens,
