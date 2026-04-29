@@ -1,7 +1,9 @@
 import os
+import json
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from langchain_anthropic import ChatAnthropic
+import google.generativeai as genai
 
 # 1. FIXED SCHEMA: Added the missing fields so the code doesn't crash
 class SearchSchema(BaseModel):
@@ -18,23 +20,9 @@ class SearchSchema(BaseModel):
     reasoning: str = Field(description="Why this specific strategy was chosen.")
 
 def generate_search_schema(user_input: str):
-    # Initialize the "Brain"
-    key = os.getenv("signal_agent") or os.getenv("ANTHROPIC_API_KEY")
-    if not key:
-        raise RuntimeError("Missing Anthropic API key (set `signal_agent` in env).")
-
     # Spend guard: cap output tokens per call (defaults conservative).
     # You can override via Railway env var `CONCIERGE_MAX_TOKENS`.
     max_tokens = int(os.getenv("CONCIERGE_MAX_TOKENS", "500"))
-    llm = ChatAnthropic(
-        model="claude-3-5-sonnet-20240620",
-        temperature=0,
-        anthropic_api_key=key,
-        max_tokens=max_tokens,
-    )
-    
-    # Bind the schema to the LLM
-    structured_llm = llm.with_structured_output(SearchSchema)
 
     # 2. OPTIMIZED PROMPT: Grouped triggers for better reasoning
     system_prompt = """STRATEGY RULES:
@@ -53,8 +41,51 @@ def generate_search_schema(user_input: str):
 
 
     """
-    response = structured_llm.invoke(f"{system_prompt}\n\nUser Request: {user_input}")
-    return response
+    # Prefer Gemini for Concierge if configured (user requested).
+    gemini_key = os.getenv("gemini") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if gemini_key:
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+
+        prompt = (
+            f"{system_prompt}\n\n"
+            "Return ONLY valid JSON that matches this schema exactly:\n"
+            f"{SearchSchema.model_json_schema()}\n\n"
+            f"User Request: {user_input}\n"
+        )
+
+        resp = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0,
+                "max_output_tokens": max_tokens,
+                "response_mime_type": "application/json",
+            },
+        )
+        text = (getattr(resp, "text", None) or "").strip()
+        if not text:
+            raise RuntimeError("Gemini returned empty response")
+        try:
+            payload = json.loads(text)
+        except Exception:
+            # Some SDK versions wrap JSON in markdown fences; try to strip.
+            cleaned = text.strip().removeprefix("```json").removesuffix("```").strip()
+            payload = json.loads(cleaned)
+        return SearchSchema.model_validate(payload)
+
+    # Fallback: Claude (Anthropic)
+    key = os.getenv("claude") or os.getenv("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("Missing LLM key (set `gemini` or `claude` in env).")
+
+    llm = ChatAnthropic(
+        model="claude-3-5-sonnet-20240620",
+        temperature=0,
+        anthropic_api_key=key,
+        max_tokens=max_tokens,
+    )
+    structured_llm = llm.with_structured_output(SearchSchema)
+    return structured_llm.invoke(f"{system_prompt}\n\nUser Request: {user_input}")
 
 if __name__ == "__main__":
     # --- TEST CASE ---

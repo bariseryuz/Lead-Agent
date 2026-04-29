@@ -20,10 +20,10 @@ class SignalInference(BaseModel):
 # --- 2. THE SIGNAL ENGINE ---
 class SignalEngine:
     def __init__(self, api_key: Optional[str] = None):
-        # Railway env var requested by user: `signal_agent`
-        resolved_key = api_key or os.getenv("signal_agent") or os.getenv("ANTHROPIC_API_KEY")
+        # Railway env var requested by user: `claude`
+        resolved_key = api_key or os.getenv("claude") or os.getenv("ANTHROPIC_API_KEY")
         if not resolved_key:
-            raise RuntimeError("Missing Anthropic API key (set `signal_agent` in env).")
+            raise RuntimeError("Missing Anthropic API key (set `claude` in env).")
 
         # Spend guard: cap output tokens per call (defaults conservative).
         # You can override via Railway env var `SIGNAL_MAX_TOKENS`.
